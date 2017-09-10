@@ -58,5 +58,23 @@ class CoreTranslator:
         for message in messages:
             self.translator(message, messenger, from_id)
 
+    def send_image(self, img_file, messenger, from_id: str):
+        try:
+            message_to = chat_mapper[messenger]['chats'][from_id]['send_to']
+        except:
+            raise Exception('Cannot find receivers')
+
+        receivers = self.get_sender(message_to)
+        for receiver in receivers:
+            for i in range(1, 4):
+                try:
+                    receiver.send_image(img_file)
+                    break
+                except Exception as e:
+                    time.sleep(i * 1)
+                    logging.info(str(e))
+                    print(e)
+        img_file.close()
+
 
 CoreTranslator = CoreTranslator()
