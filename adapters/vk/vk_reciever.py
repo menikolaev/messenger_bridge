@@ -11,7 +11,6 @@ from core.base_handler import BaseHandler
 from core.message_translator import CoreTranslator
 from core.senders import chat_mapper, get_senders
 
-PEER_ID_START = 2000000000
 user_names = {}
 
 
@@ -75,10 +74,9 @@ def get_fwd_message(msg_format, message, handler: VKHandler):
     if not fwd_messages:
         return ''
     text = ""
+    get_user_names(fwd_messages, handler)
     for forwarded in fwd_messages:
-        if forwarded['user_id'] not in user_names:
-            get_user_names([message], handler)
-        user_name = user_names[forwarded['user_id']]
+        user_name = user_names[forwarded.get('from_id') or forwarded['user_id']]
         msg = '\n'.join([construct_text(forwarded), get_fwd_message(msg_format, forwarded, handler) or ''])
         text += msg_format.format(user_name=user_name, message=msg)
     return text
@@ -111,7 +109,7 @@ def construct_message(message, handler: VKHandler):
 
 
 def get_user_names(messages, handler: VKHandler):
-    cleared_user_ids = [str(x['from_id']) for x in messages if x['from_id'] not in user_names]
+    cleared_user_ids = [str(x.get('from_id') or x.get('user_id')) for x in messages if (x.get('from_id') or x.get('user_id')) not in user_names]
     result = []
     for i in range(1, 4):
         try:
@@ -146,7 +144,7 @@ def receive_messages():
                 new_messages = [x['message']['id'] for x in result['items']
                                 if x['message']['id'] > vk_handler.last_message_id and
                                 x['message']['user_id'] == vk_handler.chat_id and
-                                x['message']['random_id'] > 0]
+                                x['message'].get('random_id', 0) > 0]
 
                 if not new_messages:
                     continue
