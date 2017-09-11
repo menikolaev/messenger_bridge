@@ -1,7 +1,7 @@
-from io import BytesIO
+# from io import BytesIO
 from multiprocessing import JoinableQueue, Process
 
-from PIL import Image
+# from PIL import Image
 
 from adapters.telegram import config
 from adapters.telegram.bot import NonFailBot
@@ -23,12 +23,12 @@ def handle_message(message):
     q.put(message)
 
 
-def webp_to_jpg(webp_file_content):
-    with BytesIO(webp_file_content) as f:
-        image = Image.open(f).convert('RGB')
-    jpeg = BytesIO()
-    image.save(jpeg, 'jpeg')
-    return jpeg
+# def webp_to_jpg(webp_file_content):
+#     with BytesIO(webp_file_content) as f:
+#         image = Image.open(f).convert('RGB')
+#     jpeg = BytesIO()
+#     image.save(jpeg, 'jpeg')
+#     return jpeg
 
 
 def construct_text(message):
