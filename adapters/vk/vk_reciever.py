@@ -49,7 +49,7 @@ class VKHandler(BaseHandler):
 
     def send(self, message, attachments=None):
         if self.chat_id:
-            result = self.api.messages.send(user_id=self.chat_id, message=message)
+            result = self.api.messages.send(peer_id=self.chat_id, message=message)
         else:
             raise ValueError('None of chat_id or user_id was set')
 
