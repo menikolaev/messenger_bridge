@@ -12,6 +12,7 @@ from core.message_translator import CoreTranslator
 from core.senders import chat_mapper, get_senders
 
 user_names = {}
+PEER_ID_START = 2000000000
 
 
 class VKHandler(BaseHandler):
@@ -31,6 +32,7 @@ class VKHandler(BaseHandler):
             self.session = vk.AuthSession(self.app_id, self.user_login, self.user_password, self.scope)
         # Параметры для отправки
         self.chat_id = credentials.get('chat_id')
+        self.chat_group_id = credentials.get('chat_group_id')
         self.user_id = credentials.get('user_id')
         # Внутренние объекты VK
         self.api = vk.API(self.session, v=api_version, lang=api_language, timeout=api_timeout)
@@ -48,7 +50,9 @@ class VKHandler(BaseHandler):
         return result['items'][0]['message']['id']
 
     def send(self, message, attachments=None):
-        if self.chat_id:
+        if self.chat_group_id:
+            result = self.api.messages.send(peer_id=PEER_ID_START + self.chat_group_id, message=message)
+        elif self.chat_id:
             result = self.api.messages.send(peer_id=self.chat_id, message=message)
         else:
             raise ValueError('None of chat_id or user_id was set')
@@ -109,7 +113,8 @@ def construct_message(message, handler: VKHandler):
 
 
 def get_user_names(messages, handler: VKHandler):
-    cleared_user_ids = [str(x.get('from_id') or x.get('user_id')) for x in messages if (x.get('from_id') or x.get('user_id')) not in user_names]
+    cleared_user_ids = [str(x.get('from_id') or x.get('user_id')) for x in messages if
+                        (x.get('from_id') or x.get('user_id')) not in user_names]
     result = []
     for i in range(1, 4):
         try:
@@ -123,7 +128,12 @@ def get_user_names(messages, handler: VKHandler):
 
 
 def get_raw_messages(ids, vk_handler):
-    result = vk_handler.api.messages.getHistory(user_id=vk_handler.chat_id)
+    if vk_handler.chat_group_id:
+        result = vk_handler.api.messages.getHistory(peer_id=PEER_ID_START + vk_handler.chat_group_id)
+    elif vk_handler.chat_id:
+        result = vk_handler.api.messages.getHistory(peer_id=vk_handler.chat_id)
+    else:
+        raise ValueError('None of chat_id or user_id was set')
     cleared = []
     for id in ids:
         for item in result['items']:
@@ -141,10 +151,17 @@ def receive_messages():
             try:
                 result = vk_handler.api.messages.getDialogs(count=30)
 
-                new_messages = [x['message']['id'] for x in result['items']
-                                if x['message']['id'] > vk_handler.last_message_id and
-                                x['message']['user_id'] == vk_handler.chat_id and
-                                x['message'].get('random_id', 0) > 0]
+                if vk_handler.chat_id:
+                    new_messages = [x['message']['id'] for x in result['items']
+                                    if x['message']['id'] > vk_handler.last_message_id and
+                                    x['message']['user_id'] == vk_handler.chat_id and
+                                    x['message'].get('random_id', 0) > 0]
+                elif vk_handler.chat_group_id:
+                    new_messages = [x['message']['id'] for x in result['items']
+                                    if x['message']['id'] > vk_handler.last_message_id and
+                                    x['message']['chat_id'] == vk_handler.chat_group_id and
+                                    # От пользователя пересыльщика сообщения не отправляем
+                                    x['message']['user_id'] != vk_handler.user_id]
 
                 if not new_messages:
                     continue
@@ -157,7 +174,7 @@ def receive_messages():
 
                 CoreTranslator.send_many(messages=[construct_message(x, vk_handler) for x in messages],
                                          messenger='vk',
-                                         from_id=str(vk_handler.chat_id))
+                                         from_id=str(vk_handler.chat_id or vk_handler.chat_group_id))
             except Exception as e:
                 logging.info(str(e))
                 print(e)
