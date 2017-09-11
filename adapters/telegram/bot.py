@@ -15,3 +15,9 @@ class NonFailBot(telebot.TeleBot):
             return super().get_updates(offset, limit, timeout, allowed_updates)
         except Exception as e:
             telebot.logger.fatal('Issues when getting info from telegram: {}', str(e))
+
+    def process_new_updates(self, updates):
+        try:
+            super().process_new_updates(updates)
+        except Exception as e:
+            telebot.logger.fatal('Issues when updating info from telegram: {}', str(e))
