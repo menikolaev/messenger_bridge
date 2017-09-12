@@ -1,3 +1,4 @@
+import html
 import logging
 import multiprocessing
 
@@ -6,6 +7,7 @@ from functools import partial
 
 import requests
 import vk
+from multiprocessing import Lock, Value
 
 from core.base_handler import BaseHandler
 from core.message_translator import CoreTranslator
@@ -13,6 +15,7 @@ from core.senders import chat_mapper, get_senders
 
 user_names = {}
 PEER_ID_START = 2000000000
+lock = Lock()
 
 
 class VKHandler(BaseHandler):
@@ -36,7 +39,7 @@ class VKHandler(BaseHandler):
         self.user_id = credentials.get('user_id')
         # Внутренние объекты VK
         self.api = vk.API(self.session, v=api_version, lang=api_language, timeout=api_timeout)
-        self.last_message_id = self.get_last_message_id()
+        self.last_message_id = Value('i', self.get_last_message_id())
 
     def get_last_message_id(self):
         if self.user_id:
@@ -50,14 +53,16 @@ class VKHandler(BaseHandler):
         return result['items'][0]['message']['id']
 
     def send(self, message, attachments=None):
-        if self.chat_group_id:
-            result = self.api.messages.send(peer_id=PEER_ID_START + self.chat_group_id, message=message)
-        elif self.chat_id:
-            result = self.api.messages.send(peer_id=self.chat_id, message=message)
-        else:
-            raise ValueError('None of chat_id or user_id was set')
+        with self.last_message_id.get_lock():
+            if self.chat_group_id:
+                result = self.api.messages.send(peer_id=PEER_ID_START + self.chat_group_id, message=message)
+            elif self.chat_id:
+                result = self.api.messages.send(peer_id=self.chat_id, message=message)
+            else:
+                raise ValueError('None of chat_id or user_id was set')
 
-        self._check_result(result)
+            self._check_result(result)
+            self.last_message_id.value = result
 
     def _check_result(self, result):
         if not isinstance(result, dict):
@@ -100,7 +105,8 @@ def construct_text(message):
                 attachments.append(attachment[attachment['type']]['photo_352'])
             else:
                 continue
-    return '{}\n{}'.format(text, '\n'.join(attachments))
+        return html.escape('\n'.join([text, '\n'.join(attachments)]))
+    return html.escape(text)
 
 
 def construct_message(message, handler: VKHandler):
@@ -116,7 +122,7 @@ def get_user_names(messages, handler: VKHandler):
     cleared_user_ids = [str(x.get('from_id') or x.get('user_id')) for x in messages if
                         (x.get('from_id') or x.get('user_id')) not in user_names]
     result = []
-    for i in range(1, 4):
+    for i in range(1, 6):
         try:
             result = handler.api.users.get(user_ids=','.join(cleared_user_ids))
             break
@@ -134,6 +140,7 @@ def get_raw_messages(ids, vk_handler):
         result = vk_handler.api.messages.getHistory(peer_id=vk_handler.chat_id)
     else:
         raise ValueError('None of chat_id or user_id was set')
+
     cleared = []
     for id in ids:
         for item in result['items']:
@@ -142,7 +149,23 @@ def get_raw_messages(ids, vk_handler):
     return cleared
 
 
-def receive_messages():
+def get_new_messages(vk_handler, result):
+    new_messages = []
+
+    if vk_handler.chat_id:
+        new_messages = [x['message']['id'] for x in result['items']
+                        if x['message']['id'] > vk_handler.last_message_id.value and
+                        x['message']['user_id'] == vk_handler.chat_id and
+                        x['message'].get('random_id', 0) > 0]
+
+    elif vk_handler.chat_group_id:
+        new_messages = [x['message']['id'] for x in result['items']
+                        if x['message']['id'] > vk_handler.last_message_id.value and
+                        x['message']['chat_id'] == vk_handler.chat_group_id]
+    return new_messages
+
+
+def receive_messages(lock):
     # TODO: переписать на getDialog, чтобы не нагружать другие чатики
     while True:
         handlers = get_senders()['vk']
@@ -151,17 +174,8 @@ def receive_messages():
             try:
                 result = vk_handler.api.messages.getDialogs(count=30)
 
-                if vk_handler.chat_id:
-                    new_messages = [x['message']['id'] for x in result['items']
-                                    if x['message']['id'] > vk_handler.last_message_id and
-                                    x['message']['user_id'] == vk_handler.chat_id and
-                                    x['message'].get('random_id', 0) > 0]
-                elif vk_handler.chat_group_id:
-                    new_messages = [x['message']['id'] for x in result['items']
-                                    if x['message']['id'] > vk_handler.last_message_id and
-                                    x['message']['chat_id'] == vk_handler.chat_group_id and
-                                    # От пользователя пересыльщика сообщения не отправляем
-                                    x['message']['user_id'] != vk_handler.user_id]
+                with vk_handler.last_message_id.get_lock():
+                    new_messages = get_new_messages(vk_handler, result)
 
                 if not new_messages:
                     continue
@@ -180,7 +194,10 @@ def receive_messages():
                 print(e)
             else:
                 try:
-                    vk_handler.last_message_id = messages[-1]['id']
+                    # Если last_message_id > messages[-1], то не обновляем
+                    with vk_handler.last_message_id.get_lock():
+                        if vk_handler.last_message_id.value < messages[-1]['id']:
+                            vk_handler.last_message_id.value = messages[-1]['id']
                 except:
                     print('Unable to get last_message_id')
 
@@ -188,7 +205,7 @@ def receive_messages():
 
 
 def start_vk():
-    vk_listener = multiprocessing.Process(target=receive_messages)
+    vk_listener = multiprocessing.Process(target=receive_messages, args=(lock,))
     vk_listener.start()
 
 

@@ -1,8 +1,8 @@
 import logging
-
 import time
 
 from core.senders import chat_mapper, senders
+from modules.main import where_lessons
 
 
 class CoreTranslator:
@@ -22,13 +22,17 @@ class CoreTranslator:
             receivers.append(sender)
         return receivers
 
+    def check_modules(self, message):
+        result = where_lessons(message=message['text'])
+        return result
+
     def get_message_to_send(self, message: dict, message_type):
-        forwarded_text = ''
         fwd_func = message.get('fwd_func')
         if fwd_func:
             forwarded_text = fwd_func(chat_mapper[message_type]['forward_format'], message['message_data'])
-
-        text_body = '\n'.join([message['text'], forwarded_text])
+            text_body = '\n'.join([message['text'], forwarded_text])
+        else:
+            text_body = message['text']
         message.update({'message': text_body})
 
         return chat_mapper[message_type]['message_format'].format(**message)
@@ -40,12 +44,24 @@ class CoreTranslator:
             raise Exception('Cannot find receivers')
 
         receivers = self.get_sender(message_to)
+
         for receiver in receivers:
             self.send_message(message, receiver)
 
+        result = self.check_modules(message)
+        if result:
+            # Текущему пользователю
+            to = [{'type': messenger, 'id': from_id}]
+            first_receiver = self.get_sender(to)[0]
+            self.send_message(result, first_receiver)
+
+            # Другие получатели
+            for receiver in receivers:
+                self.send_message(result, receiver)
+
     def send_message(self, message, receiver):
         msg = self.get_message_to_send(message, receiver.handler_type)
-        for i in range(1, 4):
+        for i in range(1, 6):
             try:
                 receiver.send(msg)
                 break
