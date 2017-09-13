@@ -58,14 +58,24 @@ def where_lessons(message):
 
         all_text = []
         for lesson in lessons:
-            text = template.format(
-                **{'track': group_map[group], 'start_time': lesson['beginLesson'], 'end_time': lesson['endLesson'],
-                   'name': lesson['discipline'], 'lecturer': lesson['lecturer'], 'auditorium': lesson['auditorium'],
-                   'kind': lesson['kindOfWork']}
-            )
-            all_text.append(text)
+            start_time = datetime.datetime.strptime('{} {}'.format(lesson['date'], lesson['beginLesson']), '%Y.%m.%d %H:%M')
+            end_time = datetime.datetime.strptime('{} {}'.format(lesson['date'], lesson['endLesson']), '%Y.%m.%d %H:%M')
+            if now < start_time:
+                text = template.format(
+                    **{'track': group_map[group], 'start_time': lesson['beginLesson'], 'end_time': lesson['endLesson'],
+                       'name': lesson['discipline'], 'lecturer': lesson['lecturer'], 'auditorium': lesson['auditorium'],
+                       'kind': lesson['kindOfWork']}
+                )
+                all_text.append(text)
+            elif start_time < now < end_time:
+                text = 'СЕЙЧАС: ' + template.format(
+                    **{'track': group_map[group], 'start_time': lesson['beginLesson'], 'end_time': lesson['endLesson'],
+                       'name': lesson['discipline'], 'lecturer': lesson['lecturer'], 'auditorium': lesson['auditorium'],
+                       'kind': lesson['kindOfWork']}
+                )
+                all_text.append(text)
 
-        if not lessons:
+        if not lessons or not all_text:
             all_text.append(group_map[group] + ': Ничего')
 
         end_text.append('\n'.join(all_text))
