@@ -1,21 +1,21 @@
-import html
+import datetime
+import json
 import logging
 import multiprocessing
-
 import time
-from functools import partial
+from multiprocessing import Value
 
 import requests
 import vk
-from multiprocessing import Lock, Value
+from vk import API
 
+from adapters.vk.message import Message
 from core.base_handler import BaseHandler
 from core.message_translator import CoreTranslator
 from core.senders import chat_mapper, get_senders
 
 user_names = {}
 PEER_ID_START = 2000000000
-lock = Lock()
 
 
 class VKHandler(BaseHandler):
@@ -38,7 +38,7 @@ class VKHandler(BaseHandler):
         self.chat_group_id = credentials.get('chat_group_id')
         self.user_id = credentials.get('user_id')
         # Внутренние объекты VK
-        self.api = vk.API(self.session, v=api_version, lang=api_language, timeout=api_timeout)
+        self.api = API(self.session, v=api_version, lang=api_language, timeout=api_timeout)
         self.last_message_id = Value('i', self.get_last_message_id())
 
     def get_last_message_id(self):
@@ -52,14 +52,16 @@ class VKHandler(BaseHandler):
 
         return result['items'][0]['message']['id']
 
-    def send(self, message, attachments=None):
+    def send(self, message, attachment=None):
         with self.last_message_id.get_lock():
             if self.chat_group_id:
-                result = self.api.messages.send(peer_id=PEER_ID_START + self.chat_group_id, message=message)
+                peer_id = PEER_ID_START + self.chat_group_id
             elif self.chat_id:
-                result = self.api.messages.send(peer_id=self.chat_id, message=message)
+                peer_id = self.chat_id
             else:
                 raise ValueError('None of chat_id or user_id was set')
+
+            result = self.api.messages.send(peer_id=peer_id, message=message, attachment=attachment)
 
             self._check_result(result)
             self.last_message_id.value = result
@@ -74,53 +76,31 @@ class VKHandler(BaseHandler):
     def send_image(self, img_file):
         upload_server = self.api.photos.getMessagesUploadServer(peer_id=self.user_id)
         link = upload_server['upload_url']
-        result = requests.post(link, files={'photo': img_file}, headers={'Content-Type': 'multipart/form-data'})
-        print(result)
+        timestamp = int(datetime.datetime.now().timestamp())
+        result = requests.post(url=link,
+                               files={'photo': ('photo_{}.png'.format(timestamp), img_file)})
+        content = json.loads(result.content)
+        photos = self.api.photos.saveMessagesPhoto(photo=content['photo'], hash=content['hash'],
+                                                   server=content['server'])
+        self.send(message=None, attachment=['photo{}_{}'.format(photos[0]['owner_id'], photos[0]['id'])])
 
 
-def get_fwd_message(msg_format, message, handler: VKHandler):
-    fwd_messages = message.get('fwd_messages')
-    if not fwd_messages:
-        return ''
-    text = ""
-    get_user_names(fwd_messages, handler)
-    for forwarded in fwd_messages:
-        user_name = user_names[forwarded.get('from_id') or forwarded['user_id']]
-        msg = '\n'.join([construct_text(forwarded), get_fwd_message(msg_format, forwarded, handler) or ''])
-        text += msg_format.format(user_name=user_name, message=msg)
-    return text
-
-
-def construct_text(message):
-    text = message['body']
-    attachments_data = message.get('attachments')
-    attachments = []
-    if attachments_data:
-        for attachment in attachments_data:
-            if attachment['type'] == 'doc':
-                attachments.append(attachment[attachment['type']]['url'])
-            elif attachment['type'] == 'photo':
-                attachments.append(attachment[attachment['type']]['photo_604'])
-            elif attachment['type'] == 'sticker':
-                attachments.append(attachment[attachment['type']]['photo_352'])
-            else:
-                continue
-        return html.escape('\n'.join([text, '\n'.join(attachments)]))
-    return html.escape(text)
-
-
-def construct_message(message, handler: VKHandler):
+def construct_message(message):
     return {
-        'user_name': user_names[message['from_id']],
-        'message_data': message,
-        'text': construct_text(message),
-        'fwd_func': partial(get_fwd_message, handler=handler)
+        'user_name': message.user_name,
+        'text': message.text,
+        'fwd_func': message.get_fwd_message
     }
 
 
 def get_user_names(messages, handler: VKHandler):
-    cleared_user_ids = [str(x.get('from_id') or x.get('user_id')) for x in messages if
-                        (x.get('from_id') or x.get('user_id')) not in user_names]
+    cleared_user_ids = []
+    flat_messages = []
+    for msg in messages:
+        flat_tree = msg.flat_messages_tree
+        flat_messages.extend(flat_tree)
+        cleared_user_ids.extend([str(x.from_id or x.user_id) for x in flat_tree
+                                 if (x.from_id or x.user_id) not in user_names])
     result = []
     for i in range(1, 6):
         try:
@@ -130,65 +110,56 @@ def get_user_names(messages, handler: VKHandler):
             print(e)
 
     for item in result:
-        user_names[item['id']] = "{} {}".format(item['first_name'], item['last_name'])
+        user_name = "{} {}".format(item['first_name'], item['last_name'])
+        if item['id'] not in user_names:
+            user_names[item['id']] = user_name
+
+    for uid, name in user_names.items():
+        filtered_messages = list(filter(lambda x: (x.from_id or x.user_id) == uid, flat_messages))
+        for msg in filtered_messages:
+            msg.user_name = name
 
 
-def get_raw_messages(ids, vk_handler):
+def get_raw_messages(vk_handler):
     if vk_handler.chat_group_id:
-        result = vk_handler.api.messages.getHistory(peer_id=PEER_ID_START + vk_handler.chat_group_id)
+        result = vk_handler.api.messages.getHistory(peer_id=PEER_ID_START + vk_handler.chat_group_id, count=30)
     elif vk_handler.chat_id:
-        result = vk_handler.api.messages.getHistory(peer_id=vk_handler.chat_id)
+        result = vk_handler.api.messages.getHistory(peer_id=vk_handler.chat_id, count=30)
     else:
         raise ValueError('None of chat_id or user_id was set')
 
+    new_messages = [x for x in result['items'] if x['id'] > vk_handler.last_message_id.value]
+
     cleared = []
-    for id in ids:
-        for item in result['items']:
-            if id == item['id']:
-                cleared.append(item)
+    for message_data in new_messages:
+        cleared.append(Message(message_data))
     return cleared
 
 
-def get_new_messages(vk_handler, result):
-    new_messages = []
-
-    if vk_handler.chat_id:
-        new_messages = [x['message']['id'] for x in result['items']
-                        if x['message']['id'] > vk_handler.last_message_id.value and
-                        x['message']['user_id'] == vk_handler.chat_id and
-                        x['message'].get('random_id', 0) > 0]
-
-    elif vk_handler.chat_group_id:
-        new_messages = [x['message']['id'] for x in result['items']
-                        if x['message']['id'] > vk_handler.last_message_id.value and
-                        x['message']['chat_id'] == vk_handler.chat_group_id]
-    return new_messages
-
-
-def receive_messages(lock):
+def receive_messages(queue):
     # TODO: переписать на getDialog, чтобы не нагружать другие чатики
     while True:
         handlers = get_senders()['vk']
 
-        for vk_handler in handlers.values():
+        for id, vk_handler in handlers.items():
             try:
-                result = vk_handler.api.messages.getDialogs(count=30)
-
                 with vk_handler.last_message_id.get_lock():
-                    new_messages = get_new_messages(vk_handler, result)
+                    raw_messages = get_raw_messages(vk_handler)
 
-                if not new_messages:
+                if not raw_messages:
                     continue
 
-                raw_messages = get_raw_messages(new_messages, vk_handler)
-
-                messages = sorted(raw_messages, key=lambda x: x['id'])
+                messages = sorted(raw_messages, key=lambda x: x.id)
 
                 get_user_names(messages, vk_handler)
 
-                CoreTranslator.send_many(messages=[construct_message(x, vk_handler) for x in messages],
-                                         messenger='vk',
-                                         from_id=str(vk_handler.chat_id or vk_handler.chat_group_id))
+                for item in messages:
+                    message = {
+                        'message': construct_message(item),
+                        'from_id': str(vk_handler.chat_id or vk_handler.chat_group_id)
+                    }
+                    queue.put(message)
+
             except Exception as e:
                 logging.info(str(e))
                 print(e)
@@ -196,16 +167,27 @@ def receive_messages(lock):
                 try:
                     # Если last_message_id > messages[-1], то не обновляем
                     with vk_handler.last_message_id.get_lock():
-                        if vk_handler.last_message_id.value < messages[-1]['id']:
-                            vk_handler.last_message_id.value = messages[-1]['id']
+                        if vk_handler.last_message_id.value < messages[-1].id:
+                            vk_handler.last_message_id.value = messages[-1].id
                 except:
                     print('Unable to get last_message_id')
 
         time.sleep(1.5)
 
 
+def message_sender(queue):
+    while True:
+        data = queue.get()
+        CoreTranslator.translator(message=data['message'], messenger='vk', from_id=data['from_id'])
+        queue.task_done()
+
+
 def start_vk():
-    vk_listener = multiprocessing.Process(target=receive_messages, args=(lock,))
+    manager = multiprocessing.Manager()
+    queue = manager.JoinableQueue()
+    vk_consumer = multiprocessing.Process(target=message_sender, args=(queue,))
+    vk_consumer.start()
+    vk_listener = multiprocessing.Process(target=receive_messages, args=(queue,))
     vk_listener.start()
 
 

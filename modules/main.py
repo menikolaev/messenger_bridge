@@ -40,21 +40,25 @@ def where_lessons(message):
     end_text = []
     for group in groups:
         result = None
-        for i in range(1, 4):
-            try:
-                result = requests.get(url.format(**{'date': now.date().strftime('%Y.%m.%d'), 'group': group}))
-                break
-            except Exception as e:
-                time.sleep(i * 0.8)
-                print(e)
+        try:
+            result = requests.get(url.format(**{'date': now.date().strftime('%Y.%m.%d'), 'group': group}))
+        except Exception as e:
+            print(e)
 
-        if result is None:
+        if result is None or result.status_code != 200:
             return {
                 'user_name': 'System',
                 'text': 'Информация не может быть получена'
             }
 
-        lessons = json.loads(result.text)['Lessons']
+        try:
+            lessons = json.loads(result.text)['Lessons']
+        except:
+            print('JSON is invalid for response')
+            return {
+                'user_name': 'System',
+                'text': 'Информация не может быть получена'
+            }
 
         all_text = []
         for lesson in lessons:

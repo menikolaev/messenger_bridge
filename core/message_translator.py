@@ -1,6 +1,8 @@
 import logging
 import time
 
+from multiprocessing import Process
+
 from core.senders import chat_mapper, senders
 from modules.main import where_lessons
 
@@ -29,7 +31,7 @@ class CoreTranslator:
     def get_message_to_send(self, message: dict, message_type):
         fwd_func = message.get('fwd_func')
         if fwd_func:
-            forwarded_text = fwd_func(chat_mapper[message_type]['forward_format'], message['message_data'])
+            forwarded_text = fwd_func(chat_mapper[message_type]['forward_format'])
             text_body = '\n'.join([message['text'], forwarded_text])
         else:
             text_body = message['text']
@@ -48,6 +50,10 @@ class CoreTranslator:
         for receiver in receivers:
             self.send_message(message, receiver)
 
+        process = Process(target=self.handle_modules, args=(message, messenger, from_id, receivers,))
+        process.start()
+
+    def handle_modules(self, message, messenger, from_id, receivers):
         result = self.check_modules(message)
         if result:
             # Текущему пользователю
@@ -91,6 +97,5 @@ class CoreTranslator:
                     logging.info(str(e))
                     print(e)
         img_file.close()
-
 
 CoreTranslator = CoreTranslator()

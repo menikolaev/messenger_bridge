@@ -1,17 +1,17 @@
-# from io import BytesIO
-from multiprocessing import JoinableQueue, Process
+from functools import partial
+from io import BytesIO
 
-# from PIL import Image
+import requests
+from PIL import Image
 
 from adapters.telegram import config
 from adapters.telegram.bot import NonFailBot
 from core.base_handler import BaseHandler
-from core.message_translator import CoreTranslator
-from core.senders import chat_mapper
+from core.senders import chat_mapper, queues
 
 bot = NonFailBot(config.token)
 
-q = JoinableQueue()
+# q = JoinableQueue()
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text', 'sticker', 'document', 'photo'])
@@ -20,15 +20,16 @@ def handle_message(message):
         bot.send_message(message.chat.id, 'This chat is not in a group of permitted chats')
         return
 
-    q.put(message)
+    # q.put(message)
+    message_sender(message)
 
 
-# def webp_to_jpg(webp_file_content):
-#     with BytesIO(webp_file_content) as f:
-#         image = Image.open(f).convert('RGB')
-#     jpeg = BytesIO()
-#     image.save(jpeg, 'jpeg')
-#     return jpeg
+def webp_to_jpg(webp_file_content):
+    with BytesIO(webp_file_content) as f:
+        image = Image.open(f).convert('RGB')
+    jpeg = BytesIO()
+    image.save(jpeg, 'png', quality=95)
+    return BytesIO(jpeg.getvalue())
 
 
 def construct_text(message):
@@ -73,38 +74,51 @@ def construct_message(message):
 
     return {
         'user_name': user_name,
-        'message_data': message,
         'text': construct_text(message),
-        'fwd_func': get_fwd_message
+        'fwd_func': partial(get_fwd_message, message=message)
     }
 
 
 def send_text(message):
     text = construct_message(message)
     try:
-        CoreTranslator.translator(text, 'tg', str(message.chat.id))
+        queues['tg'][str(message.chat.id)].put({
+            'message': text,
+            'messenger': 'tg',
+            'from_id': str(message.chat.id),
+            'type': 'text'
+        })
     except:
         bot.send_message(message.chat.id, 'Bot unavailable')
 
 
-def message_loop(queue):
-    while True:
-        message = queue.get()
-        if message.content_type == 'text':
-            send_text(message)
-        elif message.content_type == 'sticker':
-            send_text(message)
-            # file_info = bot.get_file(message.sticker.file_id)
-            # file = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path))
-            # jpeg = webp_to_jpg(file.content)
-            # try:
-            #     CoreTranslator.send_image(jpeg, 'tg', str(message.chat.id))
-            # except:
-            #     bot.send_message(message.chat.id, 'Bot unavailable')
-        else:
-            send_text(message)
+def send_image(img, message):
+    try:
+        queues['tg'][str(message.chat.id)].put({
+            'message': img,
+            'messenger': 'tg',
+            'from_id': str(message.chat.id),
+            'type': 'image'
+        })
+    except:
+        bot.send_message(message.chat.id, 'Bot unavailable')
 
-        queue.task_done()
+
+def message_sender(message):
+    if message.content_type == 'sticker':
+        send_text(message)
+        file_info = bot.get_file(message.sticker.file_id)
+        file = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path))
+        jpeg = webp_to_jpg(file.content)
+        send_image(jpeg, message)
+    elif message.content_type == 'photo':
+        send_text(message)
+        file_info = bot.get_file(message.photo[-1].file_id)
+        file_data = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path))
+        photo = BytesIO(file_data.content)
+        send_image(photo, message)
+    else:
+        send_text(message)
 
 
 class TelegramHandler(BaseHandler):
@@ -122,7 +136,4 @@ chat_mapper['tg']['sender'] = TelegramHandler
 
 
 def start_bot():
-    loop = Process(target=message_loop, args=(q,))
-    loop.start()
     bot.polling(none_stop=True)
-    q.join()
