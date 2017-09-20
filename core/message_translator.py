@@ -1,5 +1,6 @@
 import logging
 import time
+import traceback
 
 from multiprocessing import Process
 
@@ -88,7 +89,7 @@ class CoreTranslator:
 
         receivers = self.get_sender(message_to)
         for receiver in receivers:
-            for i in range(1, 4):
+            for i in range(1, 6):
                 try:
                     receiver.send_image(img_file)
                     break

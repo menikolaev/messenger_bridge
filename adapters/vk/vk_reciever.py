@@ -79,7 +79,7 @@ class VKHandler(BaseHandler):
         timestamp = int(datetime.datetime.now().timestamp())
         result = requests.post(url=link,
                                files={'photo': ('photo_{}.png'.format(timestamp), img_file)})
-        content = json.loads(result.content)
+        content = json.loads(result.content.decode('utf-8'))
         photos = self.api.photos.saveMessagesPhoto(photo=content['photo'], hash=content['hash'],
                                                    server=content['server'])
         self.send(message=None, attachment=['photo{}_{}'.format(photos[0]['owner_id'], photos[0]['id'])])
