@@ -2,3 +2,4 @@ pytelegrambotapi
 vk
 Pillow
 requests[socks]
+flask
