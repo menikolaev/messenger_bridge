@@ -4,6 +4,7 @@ from io import BytesIO
 
 import requests
 from PIL import Image
+from telebot import apihelper
 
 from adapters.telegram.bot import NonFailBot
 from core.base_handler import BaseHandler
@@ -11,6 +12,8 @@ from core.senders import chat_mapper, queues
 
 TOKEN = chat_mapper['messengers']['tg']['token']
 bot = NonFailBot(TOKEN)
+apihelper.proxy = chat_mapper['messengers']['tg']['proxies']
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -21,7 +24,7 @@ logger.setLevel(logging.DEBUG)
 def handle_message(message):
     logger.debug(f'Receiving message from {message.chat.id}')
     if str(message.chat.id) not in chat_mapper['messengers']['tg']['chats']:
-        bot.send_message(message.chat.id, 'This chat is not in a group of permitted chats')
+        # bot.send_message(message.chat.id, 'This chat is not in a group of permitted chats')
         return
 
     # q.put(message)

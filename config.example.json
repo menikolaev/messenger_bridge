@@ -28,6 +28,7 @@
     },
     "tg": {
       "token": "",
+      "proxies": {},
       "forward_format": "<b>Forwarded from {user_name}:</b>\n{message}",
       "message_format": "<b>{user_name}: </b>{message}",
       "chats": {
