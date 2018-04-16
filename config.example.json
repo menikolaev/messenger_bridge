@@ -1,0 +1,49 @@
+{
+  "is_multiprocess": false,
+  "messengers": {
+    "vk": {
+      "forward_format": "Forwarded from {user_name}:\n{message}",
+      "message_format": "FROM {user_name}:\n{message}",
+      "chats": {
+        "<vk_chat_id>": {
+          "sender": "",
+          "credentials": {
+            "auth_token": null,
+            "user_login": "",
+            "user_password": "",
+            "scope": "messages,photos,friends",
+            "app_id": "",
+            "chat_id": null,
+            "chat_group_id": 0,
+            "user_id": ""
+          },
+          "send_to": [
+            {
+              "type": "tg",
+              "id": ""
+            }
+          ]
+        }
+      }
+    },
+    "tg": {
+      "token": "",
+      "forward_format": "<b>Forwarded from {user_name}:</b>\n{message}",
+      "message_format": "<b>{user_name}: </b>{message}",
+      "chats": {
+        "<tg_chat_id>": {
+          "sender": "",
+          "credentials": {
+            "chat_id": ""
+          },
+          "send_to": [
+            {
+              "type": "vk",
+              "id": ""
+            }
+          ]
+        }
+      }
+    }
+  }
+}

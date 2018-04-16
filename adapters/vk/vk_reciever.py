@@ -3,7 +3,7 @@ import json
 import logging
 import multiprocessing
 import time
-from multiprocessing import Value
+from multiprocessing import Value, freeze_support
 
 import requests
 import vk
@@ -12,10 +12,12 @@ from vk import API
 from adapters.vk.message import Message
 from core.base_handler import BaseHandler
 from core.message_translator import CoreTranslator
-from core.senders import chat_mapper, get_senders
+from core.senders import chat_mapper, get_senders, spawn_class
 
 user_names = {}
 PEER_ID_START = 2000000000
+# logger = multiprocessing.log_to_stderr()
+# logger.setLevel(multiprocessing.SUBDEBUG)
 
 
 class VKHandler(BaseHandler):
@@ -24,7 +26,7 @@ class VKHandler(BaseHandler):
     def __init__(self, credentials: dict, api_version='5.68', api_language='ru', api_timeout=10):
         # Параметры для регистрации
         super().__init__(credentials)
-        if 'auth_token' in credentials:
+        if 'auth_token' in credentials and credentials['auth_token'] is not None:
             self.auth_token = credentials['auth_token']
             self.session = vk.Session(self.auth_token)
         else:
@@ -37,8 +39,9 @@ class VKHandler(BaseHandler):
         self.chat_id = credentials.get('chat_id')
         self.chat_group_id = credentials.get('chat_group_id')
         self.user_id = credentials.get('user_id')
+        self.api_version = api_version
         # Внутренние объекты VK
-        self.api = API(self.session, v=api_version, lang=api_language, timeout=api_timeout)
+        self.api = API(self.session, v=self.api_version, lang=api_language, timeout=api_timeout)
         self.last_message_id = Value('i', self.get_last_message_id())
 
     def get_last_message_id(self):
@@ -183,17 +186,18 @@ def message_sender(queue):
 
 
 def start_vk():
-    manager = multiprocessing.Manager()
-    queue = manager.JoinableQueue()
-    vk_consumer = multiprocessing.Process(target=message_sender, args=(queue,))
-    vk_consumer.start()
-    vk_listener = multiprocessing.Process(target=receive_messages, args=(queue,))
+    # manager = multiprocessing.Manager()
+    queue = multiprocessing.JoinableQueue()
+    vk_listener = spawn_class(target=receive_messages, args=(queue,))
     vk_listener.start()
+    vk_consumer = spawn_class(target=message_sender, args=(queue,))
+    vk_consumer.start()
 
 
-chat_mapper['vk']['sender'] = VKHandler
+chat_mapper['messengers']['vk']['sender'] = VKHandler
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     credentials = dict(app_id=0, user_login='********', user_password='********',
                        scope='messages', user_id=0)
     handler = VKHandler(credentials)

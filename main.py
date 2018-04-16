@@ -1,3 +1,4 @@
+import multiprocessing
 from flask import Flask
 
 from core.message_loop import start_message_loop
@@ -16,6 +17,7 @@ def webhook_handler():
 
 if __name__ == '__main__':
     # app.run(host='127.0.0.1', port=8000)
+    multiprocessing.freeze_support()
     create_instances()
     start_vk()
     start_message_loop()

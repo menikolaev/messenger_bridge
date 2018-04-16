@@ -1,26 +1,31 @@
+import logging
 from functools import partial
 from io import BytesIO
 
 import requests
 from PIL import Image
 
-from adapters.telegram import config
 from adapters.telegram.bot import NonFailBot
 from core.base_handler import BaseHandler
 from core.senders import chat_mapper, queues
 
-bot = NonFailBot(config.token)
+TOKEN = chat_mapper['messengers']['tg']['token']
+bot = NonFailBot(TOKEN)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # q = JoinableQueue()
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text', 'sticker', 'document', 'photo'])
 def handle_message(message):
-    if str(message.chat.id) not in chat_mapper['tg']['chats']:
+    logger.debug(f'Receiving message from {message.chat.id}')
+    if str(message.chat.id) not in chat_mapper['messengers']['tg']['chats']:
         bot.send_message(message.chat.id, 'This chat is not in a group of permitted chats')
         return
 
     # q.put(message)
+    logger.debug(f'Send message from {message.chat.id}')
     message_sender(message)
 
 
@@ -37,13 +42,13 @@ def construct_text(message):
     # TODO: сделать нормальную пересылку, не ссылочную
     if message.document:
         file_info = bot.get_file(message.document.file_id)
-        url = 'https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path)
+        url = 'https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path)
         text = 'File name: {}\n{}'.format(message.document.file_name, url)
     elif message.sticker:
         text = message.sticker.emoji
     elif message.photo:
         file_info = bot.get_file(message.photo[-1].file_id)
-        url = 'https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path)
+        url = 'https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path)
         text = 'File size: {} (KB)\nCaption: {}\n{}'.format(message.photo[-1].file_size // 1024,
                                                             message.caption or 'Empty',
                                                             url)
@@ -82,6 +87,14 @@ def construct_message(message):
 def send_text(message):
     text = construct_message(message)
     try:
+        data = {
+            'message': text,
+            'messenger': 'tg',
+            'from_id': str(message.chat.id),
+            'type': 'text'
+        }
+        logger.debug(f'Put text message from {message.chat.id} to a queue')
+        logger.debug(data)
         queues['tg'][str(message.chat.id)].put({
             'message': text,
             'messenger': 'tg',
@@ -94,12 +107,15 @@ def send_text(message):
 
 def send_image(img, message):
     try:
-        queues['tg'][str(message.chat.id)].put({
+        data = {
             'message': img,
             'messenger': 'tg',
             'from_id': str(message.chat.id),
             'type': 'image'
-        })
+        }
+        logger.debug(f'Put image message from {message.chat.id} to a queue')
+        logger.debug(data)
+        queues['tg'][str(message.chat.id)].put(data)
     except:
         bot.send_message(message.chat.id, 'Bot unavailable')
 
@@ -108,13 +124,13 @@ def message_sender(message):
     if message.content_type == 'sticker':
         send_text(message)
         file_info = bot.get_file(message.sticker.file_id)
-        file = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path))
+        file = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path))
         jpeg = webp_to_jpg(file.content)
         send_image(jpeg, message)
     elif message.content_type == 'photo':
         send_text(message)
         file_info = bot.get_file(message.photo[-1].file_id)
-        file_data = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(config.token, file_info.file_path))
+        file_data = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path))
         photo = BytesIO(file_data.content)
         send_image(photo, message)
     else:
@@ -132,7 +148,7 @@ class TelegramHandler(BaseHandler):
         bot.send_message(self.chat_id, message, parse_mode='html')
 
 
-chat_mapper['tg']['sender'] = TelegramHandler
+chat_mapper['messengers']['tg']['sender'] = TelegramHandler
 
 
 def start_bot():

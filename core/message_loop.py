@@ -1,10 +1,11 @@
 import traceback
-from multiprocessing import Process
 
 import time
 
+import multiprocessing
+
 from core.message_translator import CoreTranslator
-from core.senders import unique_queues
+from core.senders import unique_queues, spawn_class
 
 
 def message_loop():
@@ -28,5 +29,10 @@ def message_loop():
 
 
 def start_message_loop():
-    process = Process(target=message_loop)
-    process.start()
+    task = spawn_class(target=message_loop)
+    task.start()
+
+
+if __name__ == '__main__':
+    multiprocessing.freeze_support()
+    start_message_loop()

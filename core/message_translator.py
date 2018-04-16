@@ -1,10 +1,7 @@
 import logging
 import time
-import traceback
 
-from multiprocessing import Process
-
-from core.senders import chat_mapper, senders
+from core.senders import chat_mapper, senders, spawn_class
 from modules.main import where_lessons
 
 
@@ -14,11 +11,11 @@ class CoreTranslator:
         for receiver in message_to:
             rec_type = receiver['type']
             rid = receiver['id']
-            settings = chat_mapper[rec_type]['chats'][rid]
+            settings = chat_mapper['messengers'][rec_type]['chats'][rid]
             sender = senders[rec_type].get(rid)
             if not sender:
                 credentials = settings['credentials']
-                sender_class = chat_mapper[rec_type]['sender']
+                sender_class = chat_mapper['messengers'][rec_type]['sender']
                 sender = sender_class(credentials)
                 senders[rec_type][rid] = sender
 
@@ -32,17 +29,17 @@ class CoreTranslator:
     def get_message_to_send(self, message: dict, message_type):
         fwd_func = message.get('fwd_func')
         if fwd_func:
-            forwarded_text = fwd_func(chat_mapper[message_type]['forward_format'])
+            forwarded_text = fwd_func(chat_mapper['messengers'][message_type]['forward_format'])
             text_body = '\n'.join([message['text'], forwarded_text])
         else:
             text_body = message['text']
         message.update({'message': text_body})
 
-        return chat_mapper[message_type]['message_format'].format(**message)
+        return chat_mapper['messengers'][message_type]['message_format'].format(**message)
 
     def translator(self, message, messenger, from_id: str):
         try:
-            message_to = chat_mapper[messenger]['chats'][from_id]['send_to']
+            message_to = chat_mapper['messengers'][messenger]['chats'][from_id]['send_to']
         except:
             raise Exception('Cannot find receivers')
 
@@ -51,7 +48,7 @@ class CoreTranslator:
         for receiver in receivers:
             self.send_message(message, receiver)
 
-        process = Process(target=self.handle_modules, args=(message, messenger, from_id, receivers,))
+        process = spawn_class(target=self.handle_modules, args=(message, messenger, from_id, receivers,))
         process.start()
 
     def handle_modules(self, message, messenger, from_id, receivers):
@@ -83,7 +80,7 @@ class CoreTranslator:
 
     def send_image(self, img_file, messenger, from_id: str):
         try:
-            message_to = chat_mapper[messenger]['chats'][from_id]['send_to']
+            message_to = chat_mapper['messengers'][messenger]['chats'][from_id]['send_to']
         except:
             raise Exception('Cannot find receivers')
 
@@ -98,5 +95,6 @@ class CoreTranslator:
                     logging.info(str(e))
                     print(e)
         img_file.close()
+
 
 CoreTranslator = CoreTranslator()
