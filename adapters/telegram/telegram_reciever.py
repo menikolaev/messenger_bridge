@@ -11,11 +11,14 @@ from core.base_handler import BaseHandler
 from core.senders import chat_mapper, queues
 
 TOKEN = chat_mapper['messengers']['tg']['token']
+PROXIES = chat_mapper['messengers']['tg']['proxies']
+
 bot = NonFailBot(TOKEN)
-apihelper.proxy = chat_mapper['messengers']['tg']['proxies']
+apihelper.proxy = PROXIES
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 # q = JoinableQueue()
 
@@ -29,7 +32,7 @@ def handle_message(message):
 
     # q.put(message)
     logger.debug(f'Send message from {message.chat.id}')
-    message_sender(message)
+    message_sender(message, PROXIES)
 
 
 def webp_to_jpg(webp_file_content):
@@ -123,17 +126,19 @@ def send_image(img, message):
         bot.send_message(message.chat.id, 'Bot unavailable')
 
 
-def message_sender(message):
+def message_sender(message, proxies):
     if message.content_type == 'sticker':
         send_text(message)
         file_info = bot.get_file(message.sticker.file_id)
-        file = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path))
+        file = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path),
+                            proxies=proxies)
         jpeg = webp_to_jpg(file.content)
         send_image(jpeg, message)
     elif message.content_type == 'photo':
         send_text(message)
         file_info = bot.get_file(message.photo[-1].file_id)
-        file_data = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path))
+        file_data = requests.get('https://api.telegram.org/file/bot{0}/{1}'.format(TOKEN, file_info.file_path),
+                                 proxies=proxies)
         photo = BytesIO(file_data.content)
         send_image(photo, message)
     else:
